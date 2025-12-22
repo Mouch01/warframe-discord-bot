@@ -378,12 +378,16 @@ async def analyze_complete_prime_with_filters(base_name: str, equipment_type: st
                 all_farms.append(farm)
                 all_farms_list.append(farm)
                 
-                # Track pour missions communes avec détails
+                # Track pour missions communes avec détails (stocke TOUTES les infos pour filtrage)
                 mission_key = f"{farm['mission']}|{farm['planet']}|{farm['rotation']}"
                 mission_components_detailed[mission_key].append({
                     'component': comp_short,
                     'relic': relic,
-                    'drop_rate': farm['drop_rate']
+                    'drop_rate': farm['drop_rate'],
+                    'mission': farm['mission'],
+                    'planet': farm['planet'],
+                    'type': farm['type'],
+                    'rotation': farm['rotation']
                 })
         
         component_data[component] = {
@@ -450,21 +454,14 @@ async def generate_complete_analysis(
         # Filtre mission_components_detailed selon les filtres
         filtered_detailed = {}
         for mission_key, comp_list in mission_components_detailed.items():
-            # Extrait mission/planet/rotation du key
-            parts = mission_key.split('|')
-            if len(parts) == 3:
-                # Crée un dict temporaire pour tester le filtre
+            if comp_list:
+                # Utilise directement les infos du premier composant (toutes les missions sont identiques)
                 test_mission = {
-                    'mission': parts[0],
-                    'planet': parts[1],
-                    'rotation': parts[2],
-                    'type': comp_list[0].get('type', '') if comp_list else ''
+                    'mission': comp_list[0]['mission'],
+                    'planet': comp_list[0]['planet'],
+                    'type': comp_list[0]['type'],
+                    'rotation': comp_list[0]['rotation']
                 }
-                # Trouve le type depuis all_farms_list
-                for farm in all_farms_list:
-                    if farm['mission'] == parts[0] and farm['planet'] == parts[1]:
-                        test_mission['type'] = farm['type']
-                        break
                 
                 # Applique les filtres - vérifie que la mission N'EST PAS exclue
                 filtered_result = analyzer.apply_mission_filters([test_mission], filters)
