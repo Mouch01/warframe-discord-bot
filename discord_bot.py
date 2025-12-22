@@ -8,9 +8,11 @@ Bot pour analyser les drops Prime et mods sur Discord
 import discord
 from discord.ext import commands
 from discord import app_commands
+from discord.ui import Button, View
 import asyncio
 import os
-from typing import Optional
+from typing import Optional, List, Dict
+from collections import defaultdict
 import traceback
 
 # Import de l'analyseur
@@ -25,6 +27,116 @@ bot = commands.Bot(command_prefix='!', intents=INTENTS)
 
 # Instance globale de l'analyseur
 analyzer = None
+
+
+# Classes pour les boutons interactifs
+class FilterView(View):
+    """Vue avec boutons pour filtrer les missions"""
+    
+    def __init__(self, item_name: str, equipment_type: str, all_farms: List[Dict], component_data: Dict):
+        super().__init__(timeout=300)  # 5 minutes
+        self.item_name = item_name
+        self.equipment_type = equipment_type
+        self.all_farms = all_farms
+        self.component_data = component_data  # {component: {relics, farms}}
+        self.active_filters = []
+        
+        # Extrait les types de missions disponibles
+        mission_types = sorted(set(f['type'] for f in all_farms))
+        
+        # Ajoute les boutons les plus communs
+        common_filters = ['Spy', 'Defense', 'Survival', 'Duviri', 'Event']
+        for filter_name in common_filters:
+            if any(filter_name.lower() in mt.lower() for mt in mission_types):
+                button = Button(
+                    label=f"❌ {filter_name}",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"filter_{filter_name.lower()}"
+                )
+                button.callback = self.create_filter_callback(filter_name)
+                self.add_item(button)
+        
+        # Bouton pour appliquer les filtres
+        apply_button = Button(
+            label="✅ Appliquer",
+            style=discord.ButtonStyle.success,
+            custom_id="apply_filters"
+        )
+        apply_button.callback = self.apply_filters
+        self.add_item(apply_button)
+        
+        # Bouton pour réinitialiser
+        reset_button = Button(
+            label="🔄 Réinitialiser",
+            style=discord.ButtonStyle.danger,
+            custom_id="reset_filters"
+        )
+        reset_button.callback = self.reset_filters
+        self.add_item(reset_button)
+    
+    def create_filter_callback(self, filter_name: str):
+        """Crée un callback pour un bouton de filtre"""
+        async def callback(interaction: discord.Interaction):
+            # Toggle le filtre
+            if filter_name in self.active_filters:
+                self.active_filters.remove(filter_name)
+                # Change le style du bouton
+                for item in self.children:
+                    if hasattr(item, 'custom_id') and item.custom_id == f"filter_{filter_name.lower()}":
+                        item.label = f"❌ {filter_name}"
+                        item.style = discord.ButtonStyle.secondary
+            else:
+                self.active_filters.append(filter_name)
+                # Change le style du bouton
+                for item in self.children:
+                    if hasattr(item, 'custom_id') and item.custom_id == f"filter_{filter_name.lower()}":
+                        item.label = f"✅ {filter_name}"
+                        item.style = discord.ButtonStyle.primary
+            
+            await interaction.response.edit_message(
+                content=f"**Filtres actifs:** {', '.join(self.active_filters) if self.active_filters else 'Aucun'}",
+                view=self
+            )
+        
+        return callback
+    
+    async def apply_filters(self, interaction: discord.Interaction):
+        """Applique les filtres et affiche les résultats"""
+        await interaction.response.defer()
+        
+        # Filtre les missions
+        filtered_farms = analyzer.apply_mission_filters(self.all_farms, self.active_filters)
+        
+        if not filtered_farms:
+            await interaction.followup.send("⚠️ Aucune mission ne correspond aux filtres.", ephemeral=True)
+            return
+        
+        # Génère les résultats filtrés
+        result = await generate_complete_analysis(
+            self.item_name,
+            self.equipment_type,
+            filtered_farms,
+            self.component_data,
+            self.active_filters
+        )
+        
+        await send_long_message_followup(interaction, result)
+    
+    async def reset_filters(self, interaction: discord.Interaction):
+        """Réinitialise tous les filtres"""
+        self.active_filters = []
+        
+        # Réinitialise tous les boutons
+        for item in self.children:
+            if hasattr(item, 'custom_id') and item.custom_id.startswith('filter_'):
+                filter_name = item.custom_id.replace('filter_', '').capitalize()
+                item.label = f"❌ {filter_name}"
+                item.style = discord.ButtonStyle.secondary
+        
+        await interaction.response.edit_message(
+            content="**Filtres actifs:** Aucun",
+            view=self
+        )
 
 
 @bot.event
@@ -54,7 +166,7 @@ async def on_ready():
 @app_commands.describe(
     item="Nom de l'item Prime (ex: Gauss Prime, Acceltra Prime)",
     type="Type d'équipement",
-    filters="Filtres à appliquer (ex: 'Spy, Duviri')"
+    use_filters="Utiliser les boutons de filtrage interactifs (défaut: Non)"
 )
 @app_commands.choices(type=[
     app_commands.Choice(name="Warframe", value="warframe"),
@@ -66,7 +178,7 @@ async def prime_command(
     interaction: discord.Interaction,
     item: str,
     type: Optional[app_commands.Choice[str]] = None,
-    filters: Optional[str] = None
+    use_filters: Optional[bool] = False
 ):
     """Commande /prime pour analyser un item Prime"""
     await interaction.response.defer(thinking=True)
@@ -76,11 +188,6 @@ async def prime_command(
             await interaction.followup.send("❌ Bot non initialisé. Réessayez dans quelques secondes.")
             return
         
-        # Parse les filtres
-        filter_list = []
-        if filters:
-            filter_list = [f.strip() for f in filters.split(',')]
-        
         # Détermine si c'est un composant spécifique ou un item complet
         is_specific = any(keyword in item for keyword in [
             'Blueprint', 'Chassis', 'Neuroptics', 'Systems',
@@ -89,13 +196,25 @@ async def prime_command(
         
         if is_specific or not type:
             # Analyse directe d'un composant
-            result = await analyze_single_component(item, filter_list)
+            result = await analyze_single_component(item, [])
+            await send_long_message(interaction, result)
         else:
             # Analyse complète avec type
-            result = await analyze_complete_prime(item, type.value, filter_list)
-        
-        # Envoie les résultats (Discord limite à 2000 caractères par message)
-        await send_long_message(interaction, result)
+            result, all_farms, component_data = await analyze_complete_prime_with_data(
+                item, type.value, []
+            )
+            
+            if use_filters and all_farms:
+                # Envoie le résultat avec boutons de filtrage
+                view = FilterView(item, type.value, all_farms, component_data)
+                await interaction.followup.send(
+                    f"**{item}** - Utilisez les boutons pour filtrer les missions :\n\n"
+                    f"**Filtres actifs:** Aucun"
+                )
+                await interaction.channel.send(result, view=view)
+            else:
+                # Envoie le résultat normal
+                await send_long_message(interaction, result)
         
     except Exception as e:
         error_msg = f"❌ Erreur: {str(e)}\n```{traceback.format_exc()[:500]}```"
@@ -192,12 +311,12 @@ async def help_command(interaction: discord.Interaction):
 
 ## Commandes disponibles:
 
-### `/prime <item> [type] [filters]`
+### `/prime <item> <type> [use_filters]`
 Analyse un item Prime complet ou un composant spécifique.
 
 **Exemples:**
 • `/prime item:Gauss Prime type:Warframe`
-• `/prime item:Acceltra Prime type:Primary filters:Spy,Duviri`
+• `/prime item:Acceltra Prime type:Primary use_filters:True`
 • `/prime item:Gauss Prime Blueprint` (composant spécifique)
 
 **Types disponibles:**
@@ -205,6 +324,12 @@ Analyse un item Prime complet ou un composant spécifique.
 • `Primary` - Armes primaires
 • `Melee` - Armes de mêlée
 • `Secondary` - Armes secondaires
+
+**Option use_filters:**
+• Si activée, des **boutons interactifs** apparaissent pour filtrer les missions
+• Cliquez sur les boutons pour exclure : Spy, Defense, Survival, Duviri, Event
+• Bouton **✅ Appliquer** pour voir les résultats filtrés
+• Bouton **🔄 Réinitialiser** pour tout réactiver
 
 ### `/mod <mod> [filters]`
 Analyse un mod et trouve les meilleures missions pour le farmer.
@@ -219,19 +344,28 @@ Recharge les droptables (admin uniquement)
 ### `/help`
 Affiche ce message d'aide
 
-## Filtres
-Vous pouvez exclure certains types de missions en utilisant le paramètre `filters`.
-Séparez les filtres par des virgules.
+## 🎁 Missions Multi-Composants
 
-**Exemples de filtres:**
-• `Spy` - Exclut les missions d'espionnage
-• `Duviri` - Exclut les missions Duviri
-• `Defense,Spy,Event` - Exclut plusieurs types
+Le bot affiche maintenant les missions où vous pouvez farmer **plusieurs composants à la fois** !
+
+**Affichage détaillé:**
+```
+🎯 Mission (Planète) - Rotation
+   • 2 composants disponibles:
+      ▸ Chassis via Lith C5 (11.11%)
+      ▸ Systems via Neo S18 (14.29%)
+```
+
+Chaque composant indique :
+• **Nom du composant**
+• **Relique** qui le contient
+• **Taux de drop** de la relique dans cette mission
 
 ## Notes
 • Le bot agrège automatiquement les drops de plusieurs reliques
 • Les résultats sont triés par taux de drop décroissant
-• Les missions multi-composants sont mises en avant
+• Les missions multi-composants sont mises en avant avec tous les détails
+• Les boutons de filtrage permettent de personnaliser rapidement vos résultats
     """
     await interaction.response.send_message(help_text, ephemeral=True)
 
@@ -295,13 +429,13 @@ async def analyze_single_component(item_name: str, filters: list) -> str:
     return result
 
 
-async def analyze_complete_prime(base_name: str, equipment_type: str, filters: list) -> str:
-    """Analyse tous les composants d'un item Prime"""
+async def analyze_complete_prime_with_data(base_name: str, equipment_type: str, filters: list):
+    """Analyse tous les composants d'un item Prime et retourne les données"""
     # Détermine les patterns selon le type
     type_patterns = {
         'warframe': ['Blueprint', 'Chassis Blueprint', 'Neuroptics Blueprint', 'Systems Blueprint'],
         'primary': ['Blueprint', 'Stock', 'Barrel', 'Receiver'],
-        'melee': ['Blueprint', 'Blade', 'Handle', 'Guard'],  # Simplifié
+        'melee': ['Blueprint', 'Blade', 'Handle', 'Guard'],
         'secondary': ['Blueprint', 'Barrel', 'Receiver']
     }
     
@@ -316,58 +450,123 @@ async def analyze_complete_prime(base_name: str, equipment_type: str, filters: l
             valid_parts.append(component_name)
     
     if not valid_parts:
-        return f"⚠️ Aucun composant trouvé pour {base_name} (type: {equipment_type})"
+        return f"⚠️ Aucun composant trouvé pour {base_name} (type: {equipment_type})", [], {}
     
-    result = f"# 🎯 {base_name}\n\n"
-    result += f"**{len(valid_parts)} composants détectés**\n\n"
-    
-    # Analyse chaque composant
-    all_mission_components = {}
+    # Analyse chaque composant et collecte les données
+    component_data = {}  # {component: {relics: [], farms: []}}
+    all_farms_list = []
+    mission_components_detailed = defaultdict(list)  # {mission_key: [{component, relic, drop_rate}]}
     
     for component in valid_parts:
         comp_short = component.replace(f"{base_name} ", "")
-        result += f"## 📦 {comp_short}\n\n"
         
-        # Analyse simplifié
+        # Trouve les reliques
         relics = analyzer.find_item_in_relics(component)
         active_relics = [r for r, d in relics.items() if not analyzer.is_relic_vaulted(d)]
         
         if not active_relics:
+            continue
+        
+        # Collecte les farms
+        all_farms = []
+        for relic in active_relics:
+            farms = analyzer.find_relic_farm_locations(relic)
+            for farm in farms:
+                farm['relic'] = relic
+                farm['component'] = comp_short
+                all_farms.append(farm)
+                all_farms_list.append(farm)
+                
+                # Track pour missions communes avec détails
+                mission_key = f"{farm['mission']}|{farm['planet']}|{farm['rotation']}"
+                mission_components_detailed[mission_key].append({
+                    'component': comp_short,
+                    'relic': relic,
+                    'drop_rate': farm['drop_rate']
+                })
+        
+        component_data[component] = {
+            'relics': active_relics,
+            'farms': all_farms
+        }
+    
+    # Génère le résultat
+    result = await generate_complete_analysis(
+        base_name, equipment_type, all_farms_list, component_data, filters, mission_components_detailed
+    )
+    
+    return result, all_farms_list, component_data
+
+
+async def generate_complete_analysis(
+    base_name: str,
+    equipment_type: str,
+    all_farms_list: List[Dict],
+    component_data: Dict,
+    filters: List[str],
+    mission_components_detailed: Dict = None
+) -> str:
+    """Génère l'analyse complète formatée"""
+    
+    result = f"# 🎯 {base_name}\n\n"
+    result += f"**{len(component_data)} composants détectés**\n\n"
+    
+    if filters:
+        result += f"🔍 **Filtres appliqués:** {', '.join(filters)}\n\n"
+    
+    # Analyse chaque composant
+    for component, data in component_data.items():
+        comp_short = component.replace(f"{base_name} ", "")
+        result += f"## 📦 {comp_short}\n\n"
+        
+        if not data['relics']:
             result += "⚠️ Toutes les reliques sont vaulted\n\n"
             continue
         
-        # Top 3 missions pour ce composant
-        all_farms = []
-        for relic in active_relics[:2]:  # Limite à 2 reliques par composant
-            farms = analyzer.find_relic_farm_locations(relic)
-            for farm in farms[:50]:  # Limite à 50 missions par relique
-                farm['relic'] = relic
-                all_farms.append(farm)
-                # Track pour missions communes
-                mission_key = f"{farm['mission']}|{farm['planet']}|{farm['rotation']}"
-                if mission_key not in all_mission_components:
-                    all_mission_components[mission_key] = []
-                all_mission_components[mission_key].append(comp_short)
+        result += f"**Reliques:** {', '.join(data['relics'])}\n\n"
         
+        # Filtre et agrège
+        farms = data['farms']
         if filters:
-            all_farms = analyzer.apply_mission_filters(all_farms, filters)
+            farms = analyzer.apply_mission_filters(farms, filters)
         
-        all_farms = analyzer.aggregate_mission_drops(all_farms)
-        all_farms.sort(key=lambda x: x['drop_rate'], reverse=True)
+        farms = analyzer.aggregate_mission_drops(farms)
+        farms.sort(key=lambda x: x['drop_rate'], reverse=True)
         
-        for idx, farm in enumerate(all_farms[:3], 1):
+        # Top 3
+        for idx, farm in enumerate(farms[:3], 1):
             result += f"**{idx}.** {farm['mission']} ({farm['planet']}) - {farm['rotation']}\n"
             result += f"      Drop: **{farm['drop_rate']:.2f}%**\n"
         result += "\n"
     
-    # Missions multi-composants
-    common = {k: v for k, v in all_mission_components.items() if len(v) > 1}
+    # Missions multi-composants AMÉLIORÉE
+    if mission_components_detailed:
+        common = {k: v for k, v in mission_components_detailed.items() if len(v) > 1}
+    else:
+        # Fallback
+        mission_comps_simple = defaultdict(list)
+        for farm in all_farms_list:
+            mission_key = f"{farm['mission']}|{farm['planet']}|{farm['rotation']}"
+            mission_comps_simple[mission_key].append(farm.get('component', ''))
+        common = {k: [{'component': c, 'relic': '', 'drop_rate': 0} for c in v]
+                  for k, v in mission_comps_simple.items() if len(v) > 1}
+    
     if common:
         result += "## 🎁 Missions Multi-Composants\n\n"
-        for mission_key, comps in sorted(common.items(), key=lambda x: len(x[1]), reverse=True)[:5]:
+        result += "*Farmez plusieurs composants dans la même mission !*\n\n"
+        
+        for mission_key, comp_details in sorted(common.items(), key=lambda x: len(x[1]), reverse=True)[:5]:
             parts = mission_key.split('|')
             result += f"**{parts[0]} ({parts[1]}) - {parts[2]}**\n"
-            result += f"   • {len(comps)} composants: {', '.join(comps)}\n\n"
+            result += f"   • **{len(comp_details)} composants disponibles:**\n"
+            
+            # Affiche chaque composant avec sa relique et son taux
+            for detail in comp_details:
+                comp_name = detail['component']
+                relic = detail.get('relic', 'N/A')
+                drop_rate = detail.get('drop_rate', 0)
+                result += f"      ▸ **{comp_name}** via *{relic}* ({drop_rate:.2f}%)\n"
+            result += "\n"
     
     return result
 
@@ -401,6 +600,34 @@ async def send_long_message(interaction: discord.Interaction, content: str):
         else:
             await interaction.channel.send(part)
         await asyncio.sleep(0.5)  # Évite le rate limit
+
+
+async def send_long_message_followup(interaction: discord.Interaction, content: str):
+    """Envoie un message long via followup en le découpant si nécessaire"""
+    max_length = 1900
+    
+    if len(content) <= max_length:
+        await interaction.followup.send(content)
+        return
+    
+    # Découpe en plusieurs messages
+    parts = []
+    current = ""
+    
+    for line in content.split('\n'):
+        if len(current) + len(line) + 1 > max_length:
+            parts.append(current)
+            current = line + '\n'
+        else:
+            current += line + '\n'
+    
+    if current:
+        parts.append(current)
+    
+    # Envoie toutes les parties via followup
+    for part in parts:
+        await interaction.followup.send(part)
+        await asyncio.sleep(0.5)
 
 
 def main():
