@@ -433,13 +433,41 @@ async def generate_complete_analysis(
             result += f"      Drop: **{farm['drop_rate']:.2f}%**\n"
         result += "\n"
     
-    # Missions multi-composants AMÉLIORÉE
+    # Missions multi-composants AMÉLIORÉE (avec filtres appliqués)
+    # Applique les filtres sur all_farms_list avant de calculer les missions communes
+    filtered_farms_for_common = all_farms_list
+    if filters:
+        filtered_farms_for_common = analyzer.apply_mission_filters(all_farms_list, filters)
+    
     if mission_components_detailed:
-        common = {k: v for k, v in mission_components_detailed.items() if len(v) > 1}
+        # Filtre mission_components_detailed selon les filtres
+        filtered_detailed = {}
+        for mission_key, comp_list in mission_components_detailed.items():
+            # Extrait mission/planet/rotation du key
+            parts = mission_key.split('|')
+            if len(parts) == 3:
+                # Crée un dict temporaire pour tester le filtre
+                test_mission = {
+                    'mission': parts[0],
+                    'planet': parts[1],
+                    'rotation': parts[2],
+                    'type': comp_list[0].get('type', '') if comp_list else ''
+                }
+                # Trouve le type depuis all_farms_list
+                for farm in all_farms_list:
+                    if farm['mission'] == parts[0] and farm['planet'] == parts[1]:
+                        test_mission['type'] = farm['type']
+                        break
+                
+                # Applique les filtres
+                if not filters or analyzer.apply_mission_filters([test_mission], filters):
+                    filtered_detailed[mission_key] = comp_list
+        
+        common = {k: v for k, v in filtered_detailed.items() if len(v) > 1}
     else:
-        # Fallback
+        # Fallback avec filtres appliqués
         mission_comps_simple = defaultdict(list)
-        for farm in all_farms_list:
+        for farm in filtered_farms_for_common:
             mission_key = f"{farm['mission']}|{farm['planet']}|{farm['rotation']}"
             mission_comps_simple[mission_key].append(farm.get('component', ''))
         common = {k: [{'component': c, 'relic': '', 'drop_rate': 0} for c in v]
