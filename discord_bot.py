@@ -207,11 +207,14 @@ async def prime_command(
             if use_filters and all_farms:
                 # Envoie le résultat avec boutons de filtrage
                 view = FilterView(item, type.value, all_farms, component_data)
+                # Envoie d'abord le message de contrôle avec les boutons
                 await interaction.followup.send(
                     f"**{item}** - Utilisez les boutons pour filtrer les missions :\n\n"
-                    f"**Filtres actifs:** Aucun"
+                    f"**Filtres actifs:** Aucun",
+                    view=view
                 )
-                await interaction.channel.send(result, view=view)
+                # Puis envoie le résultat (peut être long)
+                await send_long_message_to_channel(interaction.channel, result)
             else:
                 # Envoie le résultat normal
                 await send_long_message(interaction, result)
@@ -627,6 +630,34 @@ async def send_long_message_followup(interaction: discord.Interaction, content: 
     # Envoie toutes les parties via followup
     for part in parts:
         await interaction.followup.send(part)
+        await asyncio.sleep(0.5)
+
+
+async def send_long_message_to_channel(channel, content: str):
+    """Envoie un message long dans un channel en le découpant si nécessaire"""
+    max_length = 1900
+    
+    if len(content) <= max_length:
+        await channel.send(content)
+        return
+    
+    # Découpe en plusieurs messages
+    parts = []
+    current = ""
+    
+    for line in content.split('\n'):
+        if len(current) + len(line) + 1 > max_length:
+            parts.append(current)
+            current = line + '\n'
+        else:
+            current += line + '\n'
+    
+    if current:
+        parts.append(current)
+    
+    # Envoie toutes les parties
+    for part in parts:
+        await channel.send(part)
         await asyncio.sleep(0.5)
 
 
