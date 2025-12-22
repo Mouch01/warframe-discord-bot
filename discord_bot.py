@@ -329,11 +329,18 @@ async def analyze_complete_prime_with_filters(base_name: str, equipment_type: st
     type_patterns = {
         'warframe': ['Blueprint', 'Chassis Blueprint', 'Neuroptics Blueprint', 'Systems Blueprint'],
         'primary': ['Blueprint', 'Stock', 'Barrel', 'Receiver'],
-        'melee': ['Blueprint', 'Blade', 'Handle', 'Guard'],
         'secondary': ['Blueprint', 'Barrel', 'Receiver']
     }
     
-    parts = type_patterns.get(equipment_type, [])
+    # Pour melee, teste d'abord Blade/Hilt, sinon Blade/Handle/Guard
+    if equipment_type == 'melee':
+        test_parts = [f"{base_name} Blade", f"{base_name} Hilt"]
+        if all(analyzer.find_item_in_relics(p) for p in test_parts):
+            parts = ['Blueprint', 'Blade', 'Hilt']
+        else:
+            parts = ['Blueprint', 'Blade', 'Handle', 'Guard']
+    else:
+        parts = type_patterns.get(equipment_type, [])
     
     # Cherche les composants
     valid_parts = []
@@ -459,8 +466,9 @@ async def generate_complete_analysis(
                         test_mission['type'] = farm['type']
                         break
                 
-                # Applique les filtres
-                if not filters or analyzer.apply_mission_filters([test_mission], filters):
+                # Applique les filtres - vérifie que la mission N'EST PAS exclue
+                filtered_result = analyzer.apply_mission_filters([test_mission], filters)
+                if len(filtered_result) > 0:  # Mission NON exclue
                     filtered_detailed[mission_key] = comp_list
         
         common = {k: v for k, v in filtered_detailed.items() if len(v) > 1}
