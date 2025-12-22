@@ -179,6 +179,71 @@ class WarframeDropAnalyzer:
         
         return farm_locations
     
+    def apply_mission_filters(self, missions: List[dict], filters: List[str]) -> List[dict]:
+        """
+        Filtre les missions en excluant celles qui correspondent aux filtres
+        
+        Args:
+            missions: Liste des missions à filtrer
+            filters: Liste des patterns à exclure
+            
+        Returns:
+            Liste des missions filtrées
+        """
+        if not filters:
+            return missions
+        
+        filtered = []
+        for mission in missions:
+            exclude = False
+            for filter_term in filters:
+                # Vérifie si le filtre correspond au type, planète ou mission
+                if (filter_term.lower() in mission.get('type', '').lower() or
+                    filter_term.lower() in mission.get('planet', '').lower() or
+                    filter_term.lower() in mission.get('mission', '').lower()):
+                    exclude = True
+                    break
+            
+            if not exclude:
+                filtered.append(mission)
+        
+        return filtered
+    
+    def aggregate_mission_drops(self, farms: List[dict]) -> List[dict]:
+        """
+        Agrège les drops identiques de plusieurs reliques
+        Combine les missions identiques (même mission, planète, type, rotation) de plusieurs reliques
+        
+        Args:
+            farms: Liste des farms (avec relic info)
+            
+        Returns:
+            Liste des farms agrégées avec reliques combinées
+        """
+        aggregated = {}
+        
+        for farm in farms:
+            # Crée une clé unique pour la mission (sans la relique)
+            key = (farm['mission'], farm['planet'], farm['type'], farm['rotation'])
+            
+            if key not in aggregated:
+                # Première occurrence de cette mission
+                aggregated[key] = farm.copy()
+                aggregated[key]['relics'] = [farm['relic']]
+            else:
+                # Mission déjà vue, ajoute la relique
+                if 'relics' not in aggregated[key]:
+                    # Convertit 'relic' (string) en 'relics' (list)
+                    aggregated[key]['relics'] = [aggregated[key].get('relic', farm['relic'])]
+                
+                if farm['relic'] not in aggregated[key]['relics']:
+                    aggregated[key]['relics'].append(farm['relic'])
+                
+                # Augmente le taux de drop (agrégation simple: max drop rate)
+                aggregated[key]['drop_rate'] = max(aggregated[key]['drop_rate'], farm['drop_rate'])
+        
+        return list(aggregated.values())
+    
     def configure_mission_filters(self, available_missions: List[dict] = None) -> List[str]:
         """
         Configure les filtres de missions à exclure des résultats
@@ -234,49 +299,6 @@ class WarframeDropAnalyzer:
             print(f"\n✅ Filtres appliqués: {', '.join(excluded)}")
         
         return excluded
-    
-    def aggregate_mission_drops(self, farm_locations: List[Dict]) -> List[Dict]:
-        """
-        Agrège les drops de plusieurs reliques pour la même mission
-        
-        Args:
-            farm_locations: Liste des missions avec leurs drops
-            
-        Returns:
-            Liste agrégée avec taux cumulés
-        """
-        # Groupe par (planet, mission, type, rotation)
-        aggregated = defaultdict(lambda: {
-            'drop_rate': 0.0,
-            'relics': []
-        })
-        
-        for farm in farm_locations:
-            key = (
-                farm['planet'],
-                farm['mission'],
-                farm['type'],
-                farm['rotation']
-            )
-            
-            aggregated[key]['drop_rate'] += farm['drop_rate']
-            aggregated[key]['relics'].append(farm['relic'])
-        
-        # Reconstruit la liste
-        result = []
-        for key, data in aggregated.items():
-            farm_data = {
-                'planet': key[0],
-                'mission': key[1],
-                'type': key[2],
-                'rotation': key[3],
-                'drop_rate': data['drop_rate'],
-                'relics': data['relics'],
-                'relic': ', '.join(data['relics'])  # Pour l'affichage
-            }
-            result.append(farm_data)
-        
-        return result
     
     def get_prime_components(self, base_name: str) -> List[str]:
         """
