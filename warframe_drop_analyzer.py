@@ -235,6 +235,49 @@ class WarframeDropAnalyzer:
         
         return excluded
     
+    def aggregate_mission_drops(self, farm_locations: List[Dict]) -> List[Dict]:
+        """
+        Agrège les drops de plusieurs reliques pour la même mission
+        
+        Args:
+            farm_locations: Liste des missions avec leurs drops
+            
+        Returns:
+            Liste agrégée avec taux cumulés
+        """
+        # Groupe par (planet, mission, type, rotation)
+        aggregated = defaultdict(lambda: {
+            'drop_rate': 0.0,
+            'relics': []
+        })
+        
+        for farm in farm_locations:
+            key = (
+                farm['planet'],
+                farm['mission'],
+                farm['type'],
+                farm['rotation']
+            )
+            
+            aggregated[key]['drop_rate'] += farm['drop_rate']
+            aggregated[key]['relics'].append(farm['relic'])
+        
+        # Reconstruit la liste
+        result = []
+        for key, data in aggregated.items():
+            farm_data = {
+                'planet': key[0],
+                'mission': key[1],
+                'type': key[2],
+                'rotation': key[3],
+                'drop_rate': data['drop_rate'],
+                'relics': data['relics'],
+                'relic': ', '.join(data['relics'])  # Pour l'affichage
+            }
+            result.append(farm_data)
+        
+        return result
+    
     def get_prime_components(self, base_name: str) -> List[str]:
         """
         Détecte tous les composants d'un item Prime selon le type d'équipement
