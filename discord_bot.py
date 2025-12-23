@@ -292,12 +292,19 @@ async def analyze_single_component(item_name: str, filters: list) -> str:
         result += "⚠️ Toutes les reliques sont vaulted.\n"
         return result
     
-    # Collecte les missions
+    # Collecte les missions avec rareté de l'item dans chaque relique
     all_farms = []
     for relic in active_relics:
         farms = analyzer.find_relic_farm_locations(relic)
+        # Récupère la rareté de l'item dans cette relique
+        relic_info = relics.get(relic, {})
+        item_rarity = relic_info.get('rarity', 'Unknown')
+        item_rarity_chance = relic_info.get('rarity_chance', 0.0)
+        
         for farm in farms:
             farm['relic'] = relic
+            farm['item_rarity'] = item_rarity
+            farm['item_rarity_chance'] = item_rarity_chance
             all_farms.append(farm)
     
     # Applique filtres et agrège
@@ -317,7 +324,9 @@ async def analyze_single_component(item_name: str, filters: list) -> str:
         if len(farm.get('relics', [])) > 1:
             result += f"   • Reliques: {relics_str} (cumulé)\n"
         else:
-            result += f"   • Relique: {relics_str}\n"
+            item_rarity = farm.get('item_rarity', 'Unknown')
+            item_rarity_chance = farm.get('item_rarity_chance', 0.0)
+            result += f"   • Relique: {relics_str} - **{item_rarity} ({item_rarity_chance:.2f}%)**\n"
         result += "\n"
     
     return result
@@ -368,13 +377,20 @@ async def analyze_complete_prime_with_filters(base_name: str, equipment_type: st
         if not active_relics:
             continue
         
-        # Collecte les farms
+        # Collecte les farms avec rareté de l'item
         all_farms = []
         for relic in active_relics:
             farms = analyzer.find_relic_farm_locations(relic)
+            # Récupère la rareté de l'item dans cette relique
+            relic_info = relics.get(relic, {})
+            item_rarity = relic_info.get('rarity', 'Unknown')
+            item_rarity_chance = relic_info.get('rarity_chance', 0.0)
+            
             for farm in farms:
                 farm['relic'] = relic
                 farm['component'] = comp_short
+                farm['item_rarity'] = item_rarity
+                farm['item_rarity_chance'] = item_rarity_chance
                 all_farms.append(farm)
                 all_farms_list.append(farm)
                 
@@ -384,6 +400,8 @@ async def analyze_complete_prime_with_filters(base_name: str, equipment_type: st
                     'component': comp_short,
                     'relic': relic,
                     'drop_rate': farm['drop_rate'],
+                    'item_rarity': item_rarity,
+                    'item_rarity_chance': item_rarity_chance,
                     'mission': farm['mission'],
                     'planet': farm['planet'],
                     'type': farm['type'],
@@ -494,12 +512,14 @@ async def generate_complete_analysis(
             result += f"**{parts[0]} ({parts[1]}) - {mission_type} - {parts[2]}**\n"
             result += f"   • **{len(comp_details)} composants disponibles:**\n"
             
-            # Affiche chaque composant avec sa relique et son taux
+            # Affiche chaque composant avec sa relique, son taux et la rareté dans la relique
             for detail in comp_details:
                 comp_name = detail['component']
                 relic = detail.get('relic', 'N/A')
                 drop_rate = detail.get('drop_rate', 0)
-                result += f"      ▸ **{comp_name}** via *{relic}* ({drop_rate:.2f}%)\n"
+                item_rarity = detail.get('item_rarity', 'Unknown')
+                item_rarity_chance = detail.get('item_rarity_chance', 0.0)
+                result += f"      ▸ **{comp_name}** via *{relic}* ({drop_rate:.2f}%) - **{item_rarity} ({item_rarity_chance:.2f}%)**\n"
             result += "\n"
     
     return result
