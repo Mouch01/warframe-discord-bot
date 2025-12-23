@@ -596,14 +596,24 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
     Génère UNE image 800x400 avec grille 2x2 (4 composants)
     En attente du template annoté pour ajustements finaux
     """
-    # Dimensions de l'image
+    # Dimensions de l'image - MESURES FIGMA EXACTES
     width, height = 800, 400
     
-    # Dimensions des cartes (2x2 dans 800x400)
-    card_w, card_h = 370, 180
+    # Dimensions des cartes - MESURES FIGMA
+    card_w, card_h = 380, 160
     icon_size = 40
-    padding = 15
-    margin = 10
+    
+    # Positions des cartes - MESURES FIGMA
+    # Carte 1 (haut gauche) : X:10, Y:50
+    # Carte 2 (bas gauche) : X:10, Y:220
+    # Carte 3 (haut droite) : X:410, Y:50
+    # Carte 4 (bas droite) : X:410, Y:220
+    card_positions = [
+        (10, 50),    # Component 1
+        (10, 220),   # Component 2
+        (410, 50),   # Component 3
+        (410, 220)   # Component 4
+    ]
     
     # Couleurs du template Figma
     bg_color = (196, 196, 196)  # Gris clair fond
@@ -617,15 +627,21 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
     img = Image.new('RGB', (width, height), bg_color)
     draw = ImageDraw.Draw(img)
     
-    # Polices Inter Regular
+    # Polices Inter Regular - MESURES FIGMA
     try:
-        font_title = ImageFont.truetype("arial.ttf", 24)  # Titre en haut
-        font_component = ImageFont.truetype("arial.ttf", 16)  # Nom du composant
-        font_mission = ImageFont.truetype("arial.ttf", 12)  # Lignes de missions
-    except:
-        font_title = ImageFont.load_default()
-        font_component = ImageFont.load_default()
-        font_mission = ImageFont.load_default()
+        font_title = ImageFont.truetype("inter/Inter-Regular.ttf", 20)  # Titre
+        font_component = ImageFont.truetype("inter/Inter-Regular.ttf", 15)  # Nom composant
+        font_mission = ImageFont.truetype("inter/Inter-Regular.ttf", 13)  # Lignes missions (FIGMA: 13)
+    except Exception as e:
+        print(f"Police Inter non trouvée, utilisation d'Arial: {e}")
+        try:
+            font_title = ImageFont.truetype("arial.ttf", 20)
+            font_component = ImageFont.truetype("arial.ttf", 15)
+            font_mission = ImageFont.truetype("arial.ttf", 13)
+        except:
+            font_title = ImageFont.load_default()
+            font_component = ImageFont.load_default()
+            font_mission = ImageFont.load_default()
     
     # Composants warframe (dans l'ordre standard)
     component_order = ['Blueprint', 'Chassis Blueprint', 'Systems Blueprint', 'Neuroptics Blueprint']
@@ -639,7 +655,7 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
     # Titre centré en haut
     title_text = item_name.upper()
     draw.text(
-        (width // 2, 15),
+        (width // 2, 20),
         title_text,
         fill=text_dark,
         anchor="mt",
@@ -654,16 +670,10 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
                 components.append((component, data))
                 break
     
-    # Grille 2x2 (commence sous le titre)
-    cols = 2
-    title_height = 40  # Espace pour le titre
+    # Dessine les 4 cartes avec positions FIGMA exactes
     for idx, (component, data) in enumerate(components[:4]):
-        col = idx % cols
-        row = idx // cols
-        
-        # Position de la carte (décalée vers le bas pour le titre)
-        x = margin + col * (card_w + padding)
-        y = title_height + margin + row * (card_h + padding)
+        # Position exacte selon Figma
+        x, y = card_positions[idx]
         
         # Dessine la carte avec coins arrondis
         draw.rounded_rectangle(
@@ -699,11 +709,11 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
         farms = analyzer.aggregate_mission_drops(farms)
         farms.sort(key=lambda x: x['drop_rate'], reverse=True)
         
-        # TOP 3 missions - Format template : "Relic Axi A1 - Mission Lieu, PLANETE : 14,88% , Rare(2%)"
-        missions_y = icon_y + icon_size + 15
+        # TOP 3 missions - Format Figma : "Relic Axi A1 - Mission Lieu, PLANETE : 14,88% , Rare(2%)"
+        missions_y = icon_y + icon_size + 10
         
         for i, farm in enumerate(farms[:3]):
-            mission_y = missions_y + i * 35
+            mission_y = missions_y + i * 30  # Espacement entre lignes
             
             # Récupère les données
             relic_name = farm.get('relic', 'Unknown Relic')
@@ -713,10 +723,10 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
             item_rarity = farm.get('item_rarity', 'Unknown')
             item_chance = farm.get('item_rarity_chance', 0.0)
             
-            # Format : "Relic Axi A1 - Mission Lieu, PLANETE : 14,88% , Rare(2%)"
+            # Format Figma exact : "Relic Axi A1 - Mission Lieu, PLANETE : 14,88% , Rare(2%)"
             mission_text = f"{relic_name} - {mission_name}, {planet_name} : {drop_relic:.2f}% , {item_rarity}({item_chance:.0f}%)"
             
-            # Affiche la ligne complète
+            # Affiche la ligne - Inter Regular 13
             draw.text(
                 (x + 10, mission_y),
                 mission_text,
