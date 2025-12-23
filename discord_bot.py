@@ -593,122 +593,145 @@ async def send_long_message_followup(interaction: discord.Interaction, content: 
 
 def generate_summary_image(item_name: str, component_data: Dict, filters: List[str], orientation: str = "landscape") -> io.BytesIO:
     """
-    Génère une image récapitulative des meilleures missions par composant
-    
-    Args:
-        item_name: Nom de l'item Prime
-        component_data: Données des composants avec leurs farms
-        filters: Filtres appliqués
-        orientation: 'landscape' ou 'portrait'
-    
-    Returns:
-        BytesIO contenant l'image PNG
+    Génère une image récapitulative style "Build Card" comme Genshin/HSR
+    Compact, lisible, toutes les infos visibles d'un coup
     """
-    # Dimensions selon orientation
+    # Dimensions optimisées pour lisibilité
     if orientation == "landscape":
-        width, height = 1920, 1080
-        title_size = 80
-        header_size = 50
-        text_size = 36
-        padding = 60
-        line_height = 50
-    else:  # portrait
-        width, height = 1080, 1920
-        title_size = 70
-        header_size = 45
-        text_size = 32
-        padding = 50
-        line_height = 45
+        width, height = 2400, 1350  # Plus large pour plus d'infos
+    else:
+        width, height = 1200, 2400
     
-    # Couleurs Warframe-themed
-    bg_color = (15, 20, 30)
-    title_color = (200, 180, 120)
-    header_color = (150, 150, 180)
-    text_color = (220, 220, 220)
-    accent_color = (100, 150, 200)
+    # Couleurs style Warframe (or brillant + bleu ciel + fond sombre)
+    bg_color = (10, 15, 25)
+    bg_accent = (20, 30, 45)
+    gold = (255, 215, 100)
+    blue_bright = (100, 180, 255)
+    white = (255, 255, 255)
+    gray_light = (200, 200, 210)
+    red = (255, 100, 100)
+    green = (100, 255, 150)
     
-    # Crée l'image
+    # Crée l'image avec fond dégradé
     img = Image.new('RGB', (width, height), bg_color)
     draw = ImageDraw.Draw(img)
     
-    # Charge une police (utilise une police par défaut si Arial n'est pas disponible)
+    # Fond dégradé simple
+    for i in range(height):
+        factor = i / height
+        color = tuple(int(bg_color[j] + (bg_accent[j] - bg_color[j]) * factor) for j in range(3))
+        draw.line([(0, i), (width, i)], fill=color)
+    
+    # Polices BEAUCOUP PLUS GROSSES
     try:
-        font_title = ImageFont.truetype("arial.ttf", title_size)
-        font_header = ImageFont.truetype("arialbd.ttf", header_size)
-        font_text = ImageFont.truetype("arial.ttf", text_size)
-        font_small = ImageFont.truetype("arial.ttf", text_size - 8)
+        font_title = ImageFont.truetype("arialbd.ttf", 90)
+        font_header = ImageFont.truetype("arialbd.ttf", 65)
+        font_text = ImageFont.truetype("arial.ttf", 50)
+        font_small = ImageFont.truetype("arial.ttf", 45)
     except:
         font_title = ImageFont.load_default()
         font_header = ImageFont.load_default()
         font_text = ImageFont.load_default()
         font_small = ImageFont.load_default()
     
-    # Titre principal
-    y_offset = padding
-    draw.text((width // 2, y_offset), f"🎯 {item_name}", fill=title_color, anchor="mt", font=font_title)
-    y_offset += title_size + padding // 2
+    margin = 40
+    padding = 25
+    y = margin
     
-    # Filtres appliqués
+    # HEADER - Titre avec fond
+    header_height = 140
+    draw.rectangle([(0, 0), (width, header_height)], fill=(30, 40, 60))
+    draw.text((width // 2, header_height // 2), item_name.upper(), fill=gold, anchor="mm", font=font_title)
+    
+    # Filtres
     if filters:
-        filter_text = f"Filtres: {', '.join(filters)}"
-        draw.text((width // 2, y_offset), filter_text, fill=accent_color, anchor="mt", font=font_small)
-        y_offset += text_size + padding // 2
+        draw.text((width // 2, header_height - 25), f"⚡ Filtres: {', '.join(filters)}", fill=blue_bright, anchor="mm", font=font_small)
     
-    # Ligne séparatrice
-    draw.line([(padding, y_offset), (width - padding, y_offset)], fill=header_color, width=3)
-    y_offset += padding // 2
+    y = header_height + margin
     
-    # Pour chaque composant, affiche top 3 condensé
-    component_count = len(component_data)
-    available_height = height - y_offset - padding
-    section_height = available_height // max(1, component_count)
+    # Layout en colonnes (2 composants par ligne)
+    components = list(component_data.items())
+    cols = 2 if orientation == "landscape" else 1
+    col_width = (width - margin * 2 - padding * (cols - 1)) // cols
+    card_height = (height - header_height - margin * 3) // ((len(components) + cols - 1) // cols)
     
-    for component, data in component_data.items():
+    for idx, (component, data) in enumerate(components):
+        col = idx % cols
+        row = idx // cols
+        
+        x_start = margin + col * (col_width + padding)
+        y_start = y + row * (card_height + padding)
+        
         comp_short = component.split(' ')[-1] if ' ' in component else component
         
-        # Filtre et trie les farms
+        # Carte du composant avec bordure colorée
+        card_x = x_start
+        card_y = y_start
+        card_w = col_width
+        card_h = card_height - padding
+        
+        # Bordure dorée
+        draw.rectangle([(card_x, card_y), (card_x + card_w, card_y + card_h)], 
+                      outline=gold, width=4, fill=bg_accent)
+        
+        # Header de la carte
+        header_h = 80
+        draw.rectangle([(card_x, card_y), (card_x + card_w, card_y + header_h)], fill=(40, 50, 70))
+        draw.text((card_x + card_w // 2, card_y + header_h // 2), comp_short, 
+                 fill=gold, anchor="mm", font=font_header)
+        
+        # Filtre et trie
         farms = data['farms']
         if filters:
             farms = analyzer.apply_mission_filters(farms, filters)
         farms = analyzer.aggregate_mission_drops(farms)
         farms.sort(key=lambda x: x['drop_rate'], reverse=True)
         
-        # En-tête du composant
-        draw.text((padding, y_offset), f"📦 {comp_short}", fill=header_color, anchor="lt", font=font_header)
-        y_offset += header_size + 20
+        # Reliques (condensé)
+        relics_y = card_y + header_h + 20
+        relics_text = ', '.join(data['relics'][:2])
+        if len(data['relics']) > 2:
+            relics_text += f" +{len(data['relics']) - 2}"
+        draw.text((card_x + 20, relics_y), f"🔷 {relics_text}", fill=blue_bright, anchor="lm", font=font_small)
         
-        # Reliques
-        relics_text = f"Reliques: {', '.join(data['relics'][:3])}"
-        if len(data['relics']) > 3:
-            relics_text += f" +{len(data['relics']) - 3}"
-        draw.text((padding + 20, y_offset), relics_text, fill=text_color, anchor="lt", font=font_small)
-        y_offset += text_size + 10
-        
-        # Top 3 missions condensées
-        for idx, farm in enumerate(farms[:3], 1):
-            mission_text = f"{idx}. {farm['mission']} ({farm['planet']}) - {farm['type']}"
-            draw.text((padding + 20, y_offset), mission_text, fill=text_color, anchor="lt", font=font_text)
-            y_offset += line_height
+        # TOP MISSION (seulement la meilleure, en gros)
+        if farms:
+            mission_y = relics_y + 60
+            farm = farms[0]
             
-            # Détails drop (très condensé)
+            # Nom mission
+            mission_name = f"{farm['mission']} ({farm['planet']})"
+            if len(mission_name) > 25:
+                mission_name = mission_name[:22] + "..."
+            draw.text((card_x + 20, mission_y), mission_name, fill=white, anchor="lm", font=font_text)
+            
+            # Type de mission
+            type_y = mission_y + 55
+            draw.text((card_x + 20, type_y), farm['type'], fill=gray_light, anchor="lm", font=font_small)
+            
+            # Drops (gros et visible)
+            drops_y = type_y + 70
             item_rarity = farm.get('item_rarity', 'Unknown')
             item_chance = farm.get('item_rarity_chance', 0.0)
-            detail_text = f"   Drop: {farm['drop_rate']:.1f}% | {item_rarity} {item_chance:.1f}%"
-            draw.text((padding + 40, y_offset), detail_text, fill=accent_color, anchor="lt", font=font_small)
-            y_offset += text_size + 5
-        
-        y_offset += padding // 4
-        
-        # Ligne séparatrice entre composants
-        if y_offset < height - padding:
-            draw.line([(padding * 2, y_offset), (width - padding * 2, y_offset)], fill=(50, 50, 70), width=2)
-            y_offset += padding // 3
+            
+            # Drop relique (vert)
+            draw.text((card_x + 20, drops_y), f"Relique: {farm['drop_rate']:.1f}%", 
+                     fill=green, anchor="lm", font=font_text)
+            
+            # Drop item dans relique (rouge/orange selon rareté)
+            rarity_color = gold if item_rarity == 'Rare' else blue_bright if item_rarity == 'Uncommon' else white
+            draw.text((card_x + 20, drops_y + 55), f"Item: {item_chance:.1f}% ({item_rarity})", 
+                     fill=rarity_color, anchor="lm", font=font_text)
+            
+            # Rotation
+            draw.text((card_x + card_w - 20, drops_y + 55), farm['rotation'], 
+                     fill=gray_light, anchor="rm", font=font_small)
     
-    # Footer
-    footer_text = "Généré par Warframe Drop Analyzer Bot"
-    draw.text((width // 2, height - padding // 2), footer_text, fill=(100, 100, 120), anchor="mb", font=font_small)
+    # Footer minimal
+    draw.text((width // 2, height - 30), "Warframe Drop Analyzer", 
+             fill=(80, 90, 110), anchor="mm", font=font_small)
     
-    # Sauvegarde en BytesIO
+    # Sauvegarde
     img_bytes = io.BytesIO()
     img.save(img_bytes, format='PNG')
     img_bytes.seek(0)
