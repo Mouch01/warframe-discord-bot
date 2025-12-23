@@ -591,23 +591,19 @@ async def send_long_message_followup(interaction: discord.Interaction, content: 
     
 
 
-def generate_summary_image(item_name: str, component_data: Dict, filters: List[str], orientation: str = "landscape") -> io.BytesIO:
+def generate_summary_image(item_name: str, component_data: Dict, filters: List[str]) -> io.BytesIO:
     """
-    Génère une image style Figma template - 4 cartes minimalistes en grille 2x2
+    Génère UNE image 800x400 avec grille 2x2 (4 composants)
+    En attente du template annoté pour ajustements finaux
     """
-    # Dimensions basées sur le template Figma
-    if orientation == "landscape":
-        width, height = 1400, 800
-        card_w, card_h = 650, 350
-        icon_size = 80
-        padding = 30
-        margin = 50
-    else:
-        width, height = 800, 1600
-        card_w, card_h = 700, 350
-        icon_size = 80
-        padding = 30
-        margin = 40
+    # Dimensions de l'image
+    width, height = 800, 400
+    
+    # Dimensions des cartes (2x2 dans 800x400)
+    card_w, card_h = 370, 180
+    icon_size = 40
+    padding = 15
+    margin = 10
     
     # Couleurs du template Figma
     bg_color = (196, 196, 196)  # Gris clair fond
@@ -621,15 +617,15 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
     img = Image.new('RGB', (width, height), bg_color)
     draw = ImageDraw.Draw(img)
     
-    # Polices lisibles
+    # Polices Inter Regular
     try:
-        font_header = ImageFont.truetype("arialbd.ttf", 42)
-        font_text = ImageFont.truetype("arial.ttf", 32)
-        font_small = ImageFont.truetype("arial.ttf", 28)
+        font_title = ImageFont.truetype("arial.ttf", 24)  # Titre en haut
+        font_component = ImageFont.truetype("arial.ttf", 16)  # Nom du composant
+        font_mission = ImageFont.truetype("arial.ttf", 12)  # Lignes de missions
     except:
-        font_header = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-        font_small = ImageFont.load_default()
+        font_title = ImageFont.load_default()
+        font_component = ImageFont.load_default()
+        font_mission = ImageFont.load_default()
     
     # Composants warframe (dans l'ordre standard)
     component_order = ['Blueprint', 'Chassis Blueprint', 'Systems Blueprint', 'Neuroptics Blueprint']
@@ -640,6 +636,16 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
         'Neuroptics Blueprint': '🧠'
     }
     
+    # Titre centré en haut
+    title_text = item_name.upper()
+    draw.text(
+        (width // 2, 15),
+        title_text,
+        fill=text_dark,
+        anchor="mt",
+        font=font_title
+    )
+    
     # Organise les composants
     components = []
     for comp_name in component_order:
@@ -648,51 +654,42 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
                 components.append((component, data))
                 break
     
-    # Grille 2x2
+    # Grille 2x2 (commence sous le titre)
     cols = 2
+    title_height = 40  # Espace pour le titre
     for idx, (component, data) in enumerate(components[:4]):
         col = idx % cols
         row = idx // cols
         
-        # Position de la carte
+        # Position de la carte (décalée vers le bas pour le titre)
         x = margin + col * (card_w + padding)
-        y = margin + row * (card_h + padding)
+        y = title_height + margin + row * (card_h + padding)
         
         # Dessine la carte avec coins arrondis
         draw.rounded_rectangle(
             [(x, y), (x + card_w, y + card_h)],
-            radius=20,
+            radius=10,
             fill=card_color
         )
         
-        # Carré blanc pour icône (haut gauche)
-        icon_x = x + 20
-        icon_y = y + 20
+        # Carré blanc vide pour icône (haut gauche)
+        icon_x = x + 10
+        icon_y = y + 10
         draw.rounded_rectangle(
             [(icon_x, icon_y), (icon_x + icon_size, icon_y + icon_size)],
-            radius=10,
+            radius=5,
             fill=icon_bg
         )
         
-        # Emoji/Icône du composant (centré dans le carré)
+        # Nom du composant (à droite de l'icône) - format : {Component name}
         comp_short = component.split(' ')[-2] if 'Blueprint' in component else component.split(' ')[-1]
-        icon = component_icons.get(comp_short + ' Blueprint', '📦')
+        comp_display = comp_short  # Garde "Blueprint", "Chassis Blueprint", etc.
         draw.text(
-            (icon_x + icon_size // 2, icon_y + icon_size // 2),
-            icon,
-            fill=text_dark,
-            anchor="mm",
-            font=font_header
-        )
-        
-        # Nom du composant (à droite de l'icône)
-        comp_display = comp_short.replace(' Blueprint', '')
-        draw.text(
-            (icon_x + icon_size + 15, icon_y + icon_size // 2),
+            (icon_x + icon_size + 8, icon_y + icon_size // 2),
             comp_display,
             fill=text_dark,
             anchor="lm",
-            font=font_header
+            font=font_component
         )
         
         # Filtre et trie les missions
@@ -702,89 +699,48 @@ def generate_summary_image(item_name: str, component_data: Dict, filters: List[s
         farms = analyzer.aggregate_mission_drops(farms)
         farms.sort(key=lambda x: x['drop_rate'], reverse=True)
         
-        # TOP 3 missions (zone principale)
-        missions_y = icon_y + icon_size + 25
+        # TOP 3 missions - Format template : "Relic Axi A1 - Mission Lieu, PLANETE : 14,88% , Rare(2%)"
+        missions_y = icon_y + icon_size + 15
         
         for i, farm in enumerate(farms[:3]):
-            mission_y = missions_y + i * 75
+            mission_y = missions_y + i * 35
             
-            # Numéro
-            draw.text(
-                (x + 20, mission_y),
-                f"{i+1}.",
-                fill=accent,
-                anchor="lm",
-                font=font_text
-            )
-            
-            # Nom mission (condensé)
-            mission_name = f"{farm['mission']} ({farm['planet']})"
-            if len(mission_name) > 28:
-                mission_name = mission_name[:25] + "..."
-            draw.text(
-                (x + 60, mission_y),
-                mission_name,
-                fill=text_dark,
-                anchor="lm",
-                font=font_text
-            )
-            
-            # Type + Rotation (ligne 2)
-            detail_y = mission_y + 35
-            draw.text(
-                (x + 60, detail_y),
-                f"{farm['type']} • {farm['rotation']}",
-                fill=text_light,
-                anchor="lm",
-                font=font_small
-            )
-            
-            # Drops (alignés à droite)
+            # Récupère les données
+            relic_name = farm.get('relic', 'Unknown Relic')
+            mission_name = farm['mission']
+            planet_name = farm['planet']
+            drop_relic = farm['drop_rate']
             item_rarity = farm.get('item_rarity', 'Unknown')
             item_chance = farm.get('item_rarity_chance', 0.0)
             
-            drop_text = f"🎲 {farm['drop_rate']:.1f}% → 🎁 {item_chance:.1f}%"
+            # Format : "Relic Axi A1 - Mission Lieu, PLANETE : 14,88% , Rare(2%)"
+            mission_text = f"{relic_name} - {mission_name}, {planet_name} : {drop_relic:.2f}% , {item_rarity}({item_chance:.0f}%)"
+            
+            # Affiche la ligne complète
             draw.text(
-                (x + card_w - 20, mission_y + 15),
-                drop_text,
-                fill=accent,
-                anchor="rm",
-                font=font_small
+                (x + 10, mission_y),
+                mission_text,
+                fill=text_dark,
+                anchor="lm",
+                font=font_mission
             )
     
-    # Titre principal en haut
-    title_y = 15
-    draw.text(
-        (width // 2, title_y),
-        item_name.upper(),
-        fill=text_dark,
-        anchor="mt",
-        font=font_header
-    )
-    
-    # Sauvegarde
-    img_bytes = io.BytesIO()
-    img.save(img_bytes, format='PNG')
-    img_bytes.seek(0)
-    
-    return img_bytes
-
+    # Sauvegarde en BytesIO
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    buffer.seek(0)
+    return buffer
 
 async def send_summary_images(interaction: discord.Interaction, item_name: str, component_data: Dict, filters: List[str]):
-    """Génère et envoie les images récapitulatives (landscape + portrait)"""
+    """Génère et envoie l'image récapitulative 800x400 avec 4 composants"""
     try:
-        # Génère l'image landscape
-        landscape_img = generate_summary_image(item_name, component_data, filters, "landscape")
-        landscape_file = discord.File(landscape_img, filename=f"{item_name.replace(' ', '_')}_recap_landscape.png")
+        # Génère 1 image 800x400 avec grille 2x2
+        img = generate_summary_image(item_name, component_data, filters)
+        filename = f"{item_name.replace(' ', '_')}_recap.png"
         
-        # Génère l'image portrait
-        portrait_img = generate_summary_image(item_name, component_data, filters, "portrait")
-        portrait_file = discord.File(portrait_img, filename=f"{item_name.replace(' ', '_')}_recap_portrait.png")
-        
-        # Envoie les images
         await interaction.followup.send(
-            content="📊 **Récapitulatif visuel**",
-            files=[landscape_file, portrait_file]
+            content="📊 **Récapitulatif**",
+            file=discord.File(img, filename=filename)
         )
     except Exception as e:
         print(f"Erreur génération images: {e}")
