@@ -52,18 +52,18 @@ class WarframeDropAnalyzer:
     def find_item_in_relics(self, item_name: str) -> Dict[str, Dict]:
         """
         Trouve toutes les reliques contenant un item donné
-        Retourne un dict {nom_relique: {'reward_mentions': X, 'drop_mentions': Y}}
+        Retourne un dict {nom_relique: {'reward_mentions': X, 'drop_mentions': Y, 'rarity': str, 'rarity_chance': float}}
         """
         print(f"🔍 Recherche de '{item_name}' dans les reliques...")
         
         # Compte les mentions de chaque relique
-        relic_data = defaultdict(lambda: {'reward_mentions': 0, 'drop_mentions': 0})
+        relic_data = defaultdict(lambda: {'reward_mentions': 0, 'drop_mentions': 0, 'rarity': None, 'rarity_chance': 0.0})
         
         # Cherche toutes les lignes contenant l'item
         text = self.soup.get_text()
         lines = text.split('\n')
         
-        # Première passe : compter les mentions dans les tableaux de récompenses des reliques
+        # Première passe : compter les mentions dans les tableaux de récompenses des reliques + extraire la rareté
         for line in lines:
             if item_name in line:
                 # Extrait le nom de la relique si présent (format: "Lith X1 Relic (Intact)")
@@ -71,6 +71,14 @@ class WarframeDropAnalyzer:
                 if relic_match:
                     relic_name = f"{relic_match.group(1)} {relic_match.group(2)}"
                     relic_data[relic_name]['reward_mentions'] += 1
+                    
+                    # Extrait la rareté de l'item dans cette relique (après le nom de l'item)
+                    # Format: "Item NameCommon" ou "Item NameUncommon (11.00%)" ou "Item NameRare (2.00%)"
+                    rarity_pattern = rf'{re.escape(item_name)}\s*(Common|Uncommon|Rare)\s*\(([0-9.]+)%\)'
+                    rarity_match = re.search(rarity_pattern, line)
+                    if rarity_match:
+                        relic_data[relic_name]['rarity'] = rarity_match.group(1)
+                        relic_data[relic_name]['rarity_chance'] = float(rarity_match.group(2))
         
         # Deuxième passe : compter combien de fois chaque relique apparaît comme drop (avec son nom + "Relic")
         for relic_name in relic_data.keys():
@@ -85,6 +93,8 @@ class WarframeDropAnalyzer:
             for relic, data in sorted(relic_data.items()):
                 reward_count = data['reward_mentions']
                 drop_count = data['drop_mentions']
+                rarity = data.get('rarity', 'Unknown')
+                rarity_chance = data.get('rarity_chance', 0.0)
                 
                 # Une relique est vaultée si elle a 4 mentions de récompense mais 0 drop
                 if reward_count == 4 and drop_count == 0:
@@ -92,7 +102,7 @@ class WarframeDropAnalyzer:
                 else:
                     status = f"✅ ACTIF ({drop_count} missions)"
                 
-                print(f"  • {relic}: {status}")
+                print(f"  • {relic}: {status} - {rarity} ({rarity_chance}%)")
         else:
             print(f"❌ '{item_name}' non trouvé dans les reliques")
         
