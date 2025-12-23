@@ -63,22 +63,24 @@ class WarframeDropAnalyzer:
         text = self.soup.get_text()
         lines = text.split('\n')
         
-        # Première passe : compter les mentions dans les tableaux de récompenses des reliques + extraire la rareté
+        # Première passe : compter les mentions dans les tableaux de récompenses des reliques + extraire la rareté INTACT
         for line in lines:
             if item_name in line:
                 # Extrait le nom de la relique si présent (format: "Lith X1 Relic (Intact)")
                 relic_match = re.search(r'(Lith|Meso|Neo|Axi)\s+([A-Z]\d+)\s+Relic\s+\((Intact|Exceptional|Flawless|Radiant)\)', line)
                 if relic_match:
                     relic_name = f"{relic_match.group(1)} {relic_match.group(2)}"
+                    refinement = relic_match.group(3)  # Intact, Exceptional, Flawless, ou Radiant
                     relic_data[relic_name]['reward_mentions'] += 1
                     
-                    # Extrait la rareté de l'item dans cette relique (après le nom de l'item)
-                    # Format: "Item NameCommon" ou "Item NameUncommon (11.00%)" ou "Item NameRare (2.00%)"
-                    rarity_pattern = rf'{re.escape(item_name)}\s*(Common|Uncommon|Rare)\s*\(([0-9.]+)%\)'
-                    rarity_match = re.search(rarity_pattern, line)
-                    if rarity_match:
-                        relic_data[relic_name]['rarity'] = rarity_match.group(1)
-                        relic_data[relic_name]['rarity_chance'] = float(rarity_match.group(2))
+                    # Extrait la rareté UNIQUEMENT pour les reliques Intact (probabilités de base)
+                    if refinement == 'Intact':
+                        # Format: "Item NameCommon" ou "Item NameUncommon (11.00%)" ou "Item NameRare (2.00%)"
+                        rarity_pattern = rf'{re.escape(item_name)}\s*(Common|Uncommon|Rare)\s*\(([0-9.]+)%\)'
+                        rarity_match = re.search(rarity_pattern, line)
+                        if rarity_match:
+                            relic_data[relic_name]['rarity'] = rarity_match.group(1)
+                            relic_data[relic_name]['rarity_chance'] = float(rarity_match.group(2))
         
         # Deuxième passe : compter combien de fois chaque relique apparaît comme drop (avec son nom + "Relic")
         for relic_name in relic_data.keys():
