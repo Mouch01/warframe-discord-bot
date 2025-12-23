@@ -458,8 +458,13 @@ async def generate_complete_analysis(
         
         # Top 3
         for idx, farm in enumerate(farms[:3], 1):
+            item_rarity = farm.get('item_rarity', 'Unknown')
+            item_rarity_chance = farm.get('item_rarity_chance', 0.0)
             result += f"**{idx}.** {farm['mission']} ({farm['planet']}) - {farm['type']} - {farm['rotation']}\n"
-            result += f"      Drop: **{farm['drop_rate']:.2f}%**\n"
+            result += f"      Drop relique: **{farm['drop_rate']:.2f}%**"
+            if item_rarity != 'Unknown':
+                result += f" | Item dans relique: **{item_rarity} ({item_rarity_chance:.2f}%)**"
+            result += "\n"
         result += "\n"
     
     # Missions multi-composants AMÉLIORÉE (avec filtres appliqués)
