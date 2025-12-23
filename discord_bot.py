@@ -13,6 +13,8 @@ import os
 from typing import Optional, List, Dict
 from collections import defaultdict
 import traceback
+from PIL import Image, ImageDraw, ImageFont
+import io
 
 # Import de l'analyseur
 from warframe_drop_analyzer import WarframeDropAnalyzer
@@ -97,10 +99,14 @@ async def prime_command(
             await send_long_message(interaction, result)
         else:
             # Analyse complète avec type et filtres
-            result = await analyze_complete_prime_with_filters(
+            result, component_data = await analyze_complete_prime_with_filters(
                 item, type.value, filter_list
             )
             await send_long_message(interaction, result)
+            
+            # Génère et envoie les images récapitulatives
+            if component_data:
+                await send_summary_images(interaction, item, component_data, filter_list)
         
     except Exception as e:
         error_msg = f"❌ Erreur: {str(e)}\n```{traceback.format_exc()[:500]}```"
@@ -413,12 +419,12 @@ async def analyze_complete_prime_with_filters(base_name: str, equipment_type: st
             'farms': all_farms
         }
     
-    # Génère le résultat
+    # Génère le résultat texte
     result = await generate_complete_analysis(
         base_name, equipment_type, all_farms_list, component_data, filters, mission_components_detailed
     )
     
-    return result
+    return result, component_data
 
 
 async def generate_complete_analysis(
@@ -583,10 +589,152 @@ async def send_long_message_followup(interaction: discord.Interaction, content: 
     if current:
         parts.append(current)
     
-    # Envoie toutes les parties via followup
-    for part in parts:
-        await interaction.followup.send(part)
-        await asyncio.sleep(0.5)
+
+
+def generate_summary_image(item_name: str, component_data: Dict, filters: List[str], orientation: str = "landscape") -> io.BytesIO:
+    """
+    Génère une image récapitulative des meilleures missions par composant
+    
+    Args:
+        item_name: Nom de l'item Prime
+        component_data: Données des composants avec leurs farms
+        filters: Filtres appliqués
+        orientation: 'landscape' ou 'portrait'
+    
+    Returns:
+        BytesIO contenant l'image PNG
+    """
+    # Dimensions selon orientation
+    if orientation == "landscape":
+        width, height = 1920, 1080
+        title_size = 80
+        header_size = 50
+        text_size = 36
+        padding = 60
+        line_height = 50
+    else:  # portrait
+        width, height = 1080, 1920
+        title_size = 70
+        header_size = 45
+        text_size = 32
+        padding = 50
+        line_height = 45
+    
+    # Couleurs Warframe-themed
+    bg_color = (15, 20, 30)
+    title_color = (200, 180, 120)
+    header_color = (150, 150, 180)
+    text_color = (220, 220, 220)
+    accent_color = (100, 150, 200)
+    
+    # Crée l'image
+    img = Image.new('RGB', (width, height), bg_color)
+    draw = ImageDraw.Draw(img)
+    
+    # Charge une police (utilise une police par défaut si Arial n'est pas disponible)
+    try:
+        font_title = ImageFont.truetype("arial.ttf", title_size)
+        font_header = ImageFont.truetype("arialbd.ttf", header_size)
+        font_text = ImageFont.truetype("arial.ttf", text_size)
+        font_small = ImageFont.truetype("arial.ttf", text_size - 8)
+    except:
+        font_title = ImageFont.load_default()
+        font_header = ImageFont.load_default()
+        font_text = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+    
+    # Titre principal
+    y_offset = padding
+    draw.text((width // 2, y_offset), f"🎯 {item_name}", fill=title_color, anchor="mt", font=font_title)
+    y_offset += title_size + padding // 2
+    
+    # Filtres appliqués
+    if filters:
+        filter_text = f"Filtres: {', '.join(filters)}"
+        draw.text((width // 2, y_offset), filter_text, fill=accent_color, anchor="mt", font=font_small)
+        y_offset += text_size + padding // 2
+    
+    # Ligne séparatrice
+    draw.line([(padding, y_offset), (width - padding, y_offset)], fill=header_color, width=3)
+    y_offset += padding // 2
+    
+    # Pour chaque composant, affiche top 3 condensé
+    component_count = len(component_data)
+    available_height = height - y_offset - padding
+    section_height = available_height // max(1, component_count)
+    
+    for component, data in component_data.items():
+        comp_short = component.split(' ')[-1] if ' ' in component else component
+        
+        # Filtre et trie les farms
+        farms = data['farms']
+        if filters:
+            farms = analyzer.apply_mission_filters(farms, filters)
+        farms = analyzer.aggregate_mission_drops(farms)
+        farms.sort(key=lambda x: x['drop_rate'], reverse=True)
+        
+        # En-tête du composant
+        draw.text((padding, y_offset), f"📦 {comp_short}", fill=header_color, anchor="lt", font=font_header)
+        y_offset += header_size + 20
+        
+        # Reliques
+        relics_text = f"Reliques: {', '.join(data['relics'][:3])}"
+        if len(data['relics']) > 3:
+            relics_text += f" +{len(data['relics']) - 3}"
+        draw.text((padding + 20, y_offset), relics_text, fill=text_color, anchor="lt", font=font_small)
+        y_offset += text_size + 10
+        
+        # Top 3 missions condensées
+        for idx, farm in enumerate(farms[:3], 1):
+            mission_text = f"{idx}. {farm['mission']} ({farm['planet']}) - {farm['type']}"
+            draw.text((padding + 20, y_offset), mission_text, fill=text_color, anchor="lt", font=font_text)
+            y_offset += line_height
+            
+            # Détails drop (très condensé)
+            item_rarity = farm.get('item_rarity', 'Unknown')
+            item_chance = farm.get('item_rarity_chance', 0.0)
+            detail_text = f"   Drop: {farm['drop_rate']:.1f}% | {item_rarity} {item_chance:.1f}%"
+            draw.text((padding + 40, y_offset), detail_text, fill=accent_color, anchor="lt", font=font_small)
+            y_offset += text_size + 5
+        
+        y_offset += padding // 4
+        
+        # Ligne séparatrice entre composants
+        if y_offset < height - padding:
+            draw.line([(padding * 2, y_offset), (width - padding * 2, y_offset)], fill=(50, 50, 70), width=2)
+            y_offset += padding // 3
+    
+    # Footer
+    footer_text = "Généré par Warframe Drop Analyzer Bot"
+    draw.text((width // 2, height - padding // 2), footer_text, fill=(100, 100, 120), anchor="mb", font=font_small)
+    
+    # Sauvegarde en BytesIO
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='PNG')
+    img_bytes.seek(0)
+    
+    return img_bytes
+
+
+async def send_summary_images(interaction: discord.Interaction, item_name: str, component_data: Dict, filters: List[str]):
+    """Génère et envoie les images récapitulatives (landscape + portrait)"""
+    try:
+        # Génère l'image landscape
+        landscape_img = generate_summary_image(item_name, component_data, filters, "landscape")
+        landscape_file = discord.File(landscape_img, filename=f"{item_name.replace(' ', '_')}_recap_landscape.png")
+        
+        # Génère l'image portrait
+        portrait_img = generate_summary_image(item_name, component_data, filters, "portrait")
+        portrait_file = discord.File(portrait_img, filename=f"{item_name.replace(' ', '_')}_recap_portrait.png")
+        
+        # Envoie les images
+        await interaction.followup.send(
+            content="📊 **Récapitulatif visuel**",
+            files=[landscape_file, portrait_file]
+        )
+    except Exception as e:
+        print(f"Erreur génération images: {e}")
+        # N'envoie pas d'erreur à l'utilisateur, juste skip les images
 
 
 def main():
